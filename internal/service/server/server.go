@@ -152,6 +152,8 @@ func New(cfg Config) *Server {
 	s.mux.HandleFunc("/v1/responses", s.handleResponses)
 	s.mux.HandleFunc("/responses", s.handleResponses)
 	s.mux.HandleFunc("/v1/models", s.handleModels)
+	s.mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
+	s.mux.HandleFunc("/chat/completions", s.handleChatCompletions)
 	s.mux.HandleFunc("/models", s.handleModels)
 	s.registerPluginRoutes()
 	if cfg.Runtime != nil && cfg.Store != nil {
