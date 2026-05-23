@@ -22,3 +22,7 @@
 ## 近期修复
 
 - 2026-05-23: 修复 OpenAI Responses adapter — Chat Completions 嵌套工具格式不识别导致 DeepSeek 400，function_call.arguments JSON 对象反序列化失败。修改 types.go, adapter.go, adapter_test.go。
+
+
+- 2026-05-23: 修复 OpenAI Responses adapter — Chat Completions 嵌套工具格式不识别导致 DeepSeek 400，function_call.arguments JSON 对象反序列化失败。修改 types.go, adapter.go, adapter_test.go。
+- 2026-05-23: 添加 /v1/chat/completions 兼容入口 — 将 Chat Completions 请求转换为 Responses 格式后委托给 handleResponses，解决 sub2api 频繁覆盖 openai_responses_supported 导致 502 的问题。新增 chat_compat.go，修改 server.go。
