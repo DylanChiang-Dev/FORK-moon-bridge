@@ -89,6 +89,52 @@ func TestToCoreRequest_AppendsInjectedTools(t *testing.T) {
 	}
 }
 
+func TestToCoreRequest_UsesNestedFunctionToolName(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+	req := &openai.ResponsesRequest{
+		Model: "gpt-4o",
+		Input: json.RawMessage(`"use the tool"`),
+		Tools: []openai.Tool{{
+			Type: "function",
+			Function: &openai.ToolFunction{
+				Name:        "lookup_weather",
+				Description: "lookup weather",
+				Parameters:  map[string]any{"type": "object"},
+			},
+		}},
+	}
+
+	result, err := adapter.ToCoreRequest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tools) != 1 {
+		t.Fatalf("tools = %+v, want one tool", result.Tools)
+	}
+	if result.Tools[0].Name != "lookup_weather" {
+		t.Fatalf("tool name = %q, want lookup_weather", result.Tools[0].Name)
+	}
+}
+
+func TestToCoreRequest_DropsNamelessFunctionTool(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+	req := &openai.ResponsesRequest{
+		Model: "gpt-4o",
+		Input: json.RawMessage(`"hello"`),
+		Tools: []openai.Tool{{
+			Type: "function",
+		}},
+	}
+
+	result, err := adapter.ToCoreRequest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Tools) != 0 {
+		t.Fatalf("tools = %+v, want no nameless tools", result.Tools)
+	}
+}
+
 func TestToCoreRequest_FunctionCallOutputImage(t *testing.T) {
 	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
 
@@ -257,6 +303,31 @@ func TestToCoreRequest_KeepsToolUseAdjacentToToolResultWhenReasoningPrecedesOutp
 	}
 	if len(toolResult.Content) != 1 || toolResult.Content[0].Type != "tool_result" || toolResult.Content[0].ToolUseID != "call_1" {
 		t.Fatalf("tool result message=%+v", toolResult)
+	}
+}
+
+func TestToCoreRequest_FunctionCallArgumentsAcceptObject(t *testing.T) {
+	adapter := openai.NewOpenAIAdapter(format.CorePluginHooks{})
+	req := &openai.ResponsesRequest{
+		Model: "gpt-5.4",
+		Input: json.RawMessage(`[
+			{"type":"function_call","id":"fc_1","call_id":"call_1","name":"tool_a","arguments":{"a":1}}
+		]`),
+	}
+
+	result, err := adapter.ToCoreRequest(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Messages) != 1 || len(result.Messages[0].Content) != 1 {
+		t.Fatalf("messages=%+v, want one tool_use", result.Messages)
+	}
+	toolUse := result.Messages[0].Content[0]
+	if toolUse.Type != "tool_use" {
+		t.Fatalf("content=%+v, want tool_use", toolUse)
+	}
+	if string(toolUse.ToolInput) != `{"a":1}` {
+		t.Fatalf("tool input = %s, want object arguments", toolUse.ToolInput)
 	}
 }
 

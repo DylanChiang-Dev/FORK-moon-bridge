@@ -933,7 +933,7 @@ type inputItem struct {
 	Summary   json.RawMessage `json:"summary"`
 	CallID    string          `json:"call_id"`
 	Name      string          `json:"name"`
-	Arguments string          `json:"arguments"`
+	Arguments json.RawMessage `json:"arguments"`
 	Output    json.RawMessage `json:"output"`
 	Input     string          `json:"input"`
 	Action    *ToolAction     `json:"action,omitempty"`
@@ -1081,10 +1081,7 @@ func convertInput(raw json.RawMessage, model string) ([]format.CoreMessage, []fo
 				pendingFCBlocks = append(pendingFCBlocks, pendingReasoning...)
 				pendingReasoning = pendingReasoning[:0]
 			}
-			toolInput := json.RawMessage(item.Arguments)
-			if !json.Valid([]byte(item.Arguments)) {
-				toolInput = json.RawMessage(`{}`)
-			}
+			toolInput := inputArgumentsToJSON(item.Arguments, "")
 			pendingFCBlocks = append(pendingFCBlocks, format.CoreContentBlock{
 				Type:      "tool_use",
 				ToolUseID: firstNonEmpty(item.CallID, item.ID),
@@ -1097,14 +1094,7 @@ func convertInput(raw json.RawMessage, model string) ([]format.CoreMessage, []fo
 				pendingFCBlocks = append(pendingFCBlocks, pendingReasoning...)
 				pendingReasoning = pendingReasoning[:0]
 			}
-			toolInput := json.RawMessage(item.Arguments)
-			if !json.Valid([]byte(item.Arguments)) {
-				if item.Input != "" {
-					toolInput, _ = json.Marshal(map[string]string{"input": item.Input})
-				} else {
-					toolInput = json.RawMessage(`{}`)
-				}
-			}
+			toolInput := inputArgumentsToJSON(item.Arguments, item.Input)
 			if item.Type == "local_shell_call" && item.Action != nil {
 				data, _ := json.Marshal(item.Action)
 				toolInput = data
@@ -1439,6 +1429,32 @@ func outputToString(raw json.RawMessage) string {
 	return string(raw)
 }
 
+func inputArgumentsToJSON(raw json.RawMessage, fallbackInput string) json.RawMessage {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return fallbackInputJSON(fallbackInput)
+	}
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		if json.Valid([]byte(asString)) {
+			return json.RawMessage(asString)
+		}
+		return fallbackInputJSON(fallbackInput)
+	}
+	if json.Valid(raw) {
+		return raw
+	}
+	return fallbackInputJSON(fallbackInput)
+}
+
+func fallbackInputJSON(input string) json.RawMessage {
+	if input == "" {
+		return json.RawMessage(`{}`)
+	}
+	data, _ := json.Marshal(map[string]string{"input": input})
+	return data
+}
+
 // localShellActionFromRaw parses tool input JSON into a ToolAction for local_shell.
 func localShellActionFromRaw(raw json.RawMessage) *ToolAction {
 	var input struct {
@@ -1524,17 +1540,21 @@ func buildToolOutputItemStreaming(block *format.CoreContentBlock, extensions map
 // Custom tools are expanded using codex package helpers.
 // Namespace tools are recursively flattened.
 func convertToolWithNamespace(tool Tool, namespace string, disablePatchProxy func(string) bool) []format.CoreTool {
-	name := namespacedToolName(namespace, tool.Name)
+	toolName := toolName(tool)
+	name := namespacedToolName(namespace, toolName)
+	if name == "" {
+		return nil
+	}
 	ext := make(map[string]any)
 
 	switch tool.Type {
 	case "function":
 		ct := format.CoreTool{
 			Name:        name,
-			Description: tool.Description,
-			InputSchema: tool.Parameters,
+			Description: toolDescription(tool),
+			InputSchema: toolParameters(tool),
 		}
-		codextool.AnnotateCoreTool(&ct, codextool.ToolFunction, tool.Name, namespace)
+		codextool.AnnotateCoreTool(&ct, codextool.ToolFunction, toolName, namespace)
 		return []format.CoreTool{ct}
 
 	case "web_search", "web_search_preview":
@@ -1572,25 +1592,25 @@ func convertToolWithNamespace(tool Tool, namespace string, disablePatchProxy fun
 		}}
 
 	case "namespace":
-		ns := namespacedToolName(namespace, tool.Name)
+		ns := namespacedToolName(namespace, toolName)
 		return flattenToolsWithNamespace(tool.Tools, ns, disablePatchProxy)
 
 	case "custom":
 		grammar := codextool.CustomToolGrammar(tool.Format)
-		if tool.Name == "local_shell" {
+		if toolName == "local_shell" {
 			ct := format.CoreTool{
 				Name:        name,
 				Description: tool.Description,
 				InputSchema: codextool.LocalShellSchema(),
 			}
-			codextool.AnnotateCoreTool(&ct, codextool.ToolLocalShell, tool.Name, "")
+			codextool.AnnotateCoreTool(&ct, codextool.ToolLocalShell, toolName, "")
 			return []format.CoreTool{ct}
 		}
 		if codextool.IsApplyPatchGrammar(grammar) {
-			if disablePatchProxy == nil || !disablePatchProxy(tool.Name) {
+			if disablePatchProxy == nil || !disablePatchProxy(toolName) {
 				proxyTools := codextool.ApplyPatchProxyCoreTools(name)
 				for i := range proxyTools {
-					codextool.AnnotateCoreTool(&proxyTools[i], codextool.ToolApplyPatch, tool.Name, "")
+					codextool.AnnotateCoreTool(&proxyTools[i], codextool.ToolApplyPatch, toolName, "")
 				}
 				return proxyTools
 			}
@@ -1611,7 +1631,7 @@ func convertToolWithNamespace(tool Tool, namespace string, disablePatchProxy fun
 			Description: customToolDescription(tool, grammar),
 			InputSchema: codextool.CustomToolInputSchema(grammar),
 		}
-		codextool.AnnotateCoreTool(&ct, codextool.ToolRaw, tool.Name, "")
+		codextool.AnnotateCoreTool(&ct, codextool.ToolRaw, toolName, "")
 		return []format.CoreTool{ct}
 
 	default:
@@ -1647,6 +1667,36 @@ func flattenToolsWithNamespace(openaiTools []Tool, namespace string, disablePatc
 	}
 	result = deduped
 	return result
+}
+
+func toolName(tool Tool) string {
+	if strings.TrimSpace(tool.Name) != "" {
+		return strings.TrimSpace(tool.Name)
+	}
+	if tool.Function != nil {
+		return strings.TrimSpace(tool.Function.Name)
+	}
+	return ""
+}
+
+func toolDescription(tool Tool) string {
+	if strings.TrimSpace(tool.Description) != "" {
+		return tool.Description
+	}
+	if tool.Function != nil {
+		return tool.Function.Description
+	}
+	return ""
+}
+
+func toolParameters(tool Tool) map[string]any {
+	if tool.Parameters != nil {
+		return tool.Parameters
+	}
+	if tool.Function != nil {
+		return tool.Function.Parameters
+	}
+	return nil
 }
 
 // namespacedToolName joins namespace and name.

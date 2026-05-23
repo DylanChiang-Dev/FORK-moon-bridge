@@ -46,6 +46,7 @@ type Tool struct {
 	Name               string         `json:"name,omitempty"`
 	Description        string         `json:"description,omitempty"`
 	Parameters         map[string]any `json:"parameters,omitempty"`
+	Function           *ToolFunction  `json:"function,omitempty"`
 	Strict             *bool          `json:"strict,omitempty"`
 	Format             map[string]any `json:"format,omitempty"`
 	Tools              []Tool         `json:"tools,omitempty"`
@@ -54,6 +55,13 @@ type Tool struct {
 	MaxNumResults      int            `json:"max_num_results,omitempty"`
 	DisplayWidth       int            `json:"display_width,omitempty"`
 	DisplayHeight      int            `json:"display_height,omitempty"`
+}
+
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
+	Strict      *bool          `json:"strict,omitempty"`
 }
 
 // ============================================================================
