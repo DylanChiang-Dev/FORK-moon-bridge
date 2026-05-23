@@ -18,3 +18,7 @@
 ## Decisions
 
 - `AGENTS.md`, `MEMORY.md`, and `RULES.md` are repository files and should not be ignored.
+
+## 近期修复
+
+- 2026-05-23: 修复 OpenAI Responses adapter — Chat Completions 嵌套工具格式不识别导致 DeepSeek 400，function_call.arguments JSON 对象反序列化失败。修改 types.go, adapter.go, adapter_test.go。
